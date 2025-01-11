@@ -26,7 +26,7 @@ export abstract class TextObject extends BaseMovement {
 
   public override async execActionForOperator(
     position: Position,
-    vimState: VimState
+    vimState: VimState,
   ): Promise<IMovement> {
     const res = await this.execAction(position, vimState);
     // Since we need to handle leading spaces, we cannot use MoveWordBegin.execActionForOperator
@@ -135,7 +135,7 @@ export class SelectABigWord extends TextObject {
         stop = position.getLineEnd();
       } else if (
         (nextWord.isEqual(
-          TextEditor.getFirstNonWhitespaceCharOnLine(vimState.document, nextWord.line)
+          TextEditor.getFirstNonWhitespaceCharOnLine(vimState.document, nextWord.line),
         ) ||
           nextWord.isLineEnd()) &&
         vimState.recordedState.count === 0
@@ -190,7 +190,7 @@ export class SelectAnExpandingBlock extends ExpandingSelection {
     position: Position,
     vimState: VimState,
     firstIteration: boolean,
-    lastIteration: boolean
+    lastIteration: boolean,
   ): Promise<IMovement> {
     const blocks = [
       new MoveAroundDoubleQuotes(),
@@ -208,7 +208,7 @@ export class SelectAnExpandingBlock extends ExpandingSelection {
       const cursorPos = new Position(position.line, position.character);
       const cursorStartPos = new Position(
         vimState.cursorStartPosition.line,
-        vimState.cursorStartPosition.character
+        vimState.cursorStartPosition.character,
       );
       ranges.push(await block.execAction(cursorPos, vimState, firstIteration, lastIteration));
       vimState.cursorStartPosition = cursorStartPos;
@@ -223,7 +223,7 @@ export class SelectAnExpandingBlock extends ExpandingSelection {
     for (const iMotion of ranges) {
       const currentSelectedRange = new Cursor(
         vimState.cursorStartPosition,
-        vimState.cursorStopPosition
+        vimState.cursorStopPosition,
       );
       if (iMotion.failed) {
         continue;
@@ -266,11 +266,11 @@ export class SelectAnExpandingBlock extends ExpandingSelection {
       // revert relevant state changes
       vimState.cursorStartPosition = new Position(
         smallestRange.start.line,
-        smallestRange.start.character
+        smallestRange.start.character,
       );
       vimState.cursorStopPosition = new Position(
         smallestRange.stop.line,
-        smallestRange.stop.character
+        smallestRange.stop.character,
       );
       vimState.recordedState.operatorPositionDiff = undefined;
       return {
@@ -609,13 +609,13 @@ abstract class IndentObjectMatch extends TextObject {
       vimState.document,
       firstValidLineNumber,
       cursorIndent,
-      -1
+      -1,
     );
     let endLineNumber = IndentObjectMatch.findRangeStartOrEnd(
       vimState.document,
       firstValidLineNumber,
       cursorIndent,
-      1
+      1,
     );
 
     // Adjust the start line as needed.
@@ -646,7 +646,11 @@ abstract class IndentObjectMatch extends TextObject {
     // care about here since it just means this text object wouldn't work on a
     // single-line document.
     let endCharacter: number;
-    if (endLineNumber === vimState.document.lineCount - 1 || vimState.currentMode === Mode.Visual) {
+    if (
+      endLineNumber === vimState.document.lineCount - 1 ||
+      vimState.currentMode === Mode.Visual ||
+      vimState.currentMode === Mode.VisualLine
+    ) {
       endCharacter = TextEditor.getLineLength(endLineNumber);
     } else {
       endCharacter = 0;
@@ -660,7 +664,7 @@ abstract class IndentObjectMatch extends TextObject {
 
   public override async execActionForOperator(
     position: Position,
-    vimState: VimState
+    vimState: VimState,
   ): Promise<IMovement> {
     return this.execAction(position, vimState);
   }
@@ -685,7 +689,7 @@ abstract class IndentObjectMatch extends TextObject {
     document: TextDocument,
     startIndex: number,
     cursorIndent: number,
-    step: -1 | 1
+    step: -1 | 1,
   ): number {
     let i = startIndex;
     let ret = startIndex;
@@ -707,17 +711,20 @@ abstract class IndentObjectMatch extends TextObject {
 @RegisterAction
 class InsideIndentObject extends IndentObjectMatch {
   keys = ['i', 'i'];
+  override modes = [Mode.Normal, Mode.Visual, Mode.VisualLine, Mode.VisualBlock];
 }
 
 @RegisterAction
 class InsideIndentObjectAbove extends IndentObjectMatch {
   keys = ['a', 'i'];
+  override modes = [Mode.Normal, Mode.Visual, Mode.VisualLine, Mode.VisualBlock];
   override includeLineAbove = true;
 }
 
 @RegisterAction
 class InsideIndentObjectBoth extends IndentObjectMatch {
   keys = ['a', 'I'];
+  override modes = [Mode.Normal, Mode.Visual, Mode.VisualLine, Mode.VisualBlock];
   override includeLineAbove = true;
   override includeLineBelow = true;
 }
@@ -789,12 +796,12 @@ abstract class SelectArgument extends TextObject {
       SelectInnerArgument.findLeftArgumentBoundary(
         vimState.document,
         leftSearchStartPosition,
-        true
+        true,
       ) === undefined ||
       SelectInnerArgument.findRightArgumentBoundary(
         vimState.document,
         rightSearchStartPosition,
-        true
+        true,
       ) === undefined
     ) {
       return failure;
@@ -802,7 +809,7 @@ abstract class SelectArgument extends TextObject {
 
     const leftArgumentBoundary = SelectInnerArgument.findLeftArgumentBoundary(
       vimState.document,
-      leftSearchStartPosition
+      leftSearchStartPosition,
     );
     if (leftArgumentBoundary === undefined) {
       return failure;
@@ -810,7 +817,7 @@ abstract class SelectArgument extends TextObject {
 
     const rightArgumentBoundary = SelectInnerArgument.findRightArgumentBoundary(
       vimState.document,
-      rightSearchStartPosition
+      rightSearchStartPosition,
     );
     if (rightArgumentBoundary === undefined) {
       return failure;
@@ -821,10 +828,10 @@ abstract class SelectArgument extends TextObject {
 
     if (this.selectAround) {
       const isLeftOnOpening: boolean = SelectArgument.openingDelimiterCharacters().includes(
-        TextEditor.getCharAt(vimState.document, leftArgumentBoundary)
+        TextEditor.getCharAt(vimState.document, leftArgumentBoundary),
       );
       const isRightOnClosing: boolean = SelectArgument.closingDelimiterCharacters().includes(
-        TextEditor.getCharAt(vimState.document, rightArgumentBoundary)
+        TextEditor.getCharAt(vimState.document, rightArgumentBoundary),
       );
 
       // Edge-case:
@@ -896,7 +903,7 @@ abstract class SelectArgument extends TextObject {
   private static findLeftArgumentBoundary(
     document: TextDocument,
     position: Position,
-    ignoreSeparators: boolean = false
+    ignoreSeparators: boolean = false,
   ): Position | undefined {
     let delimiterPosition: Position | undefined;
     let walkingPosition = position;
@@ -937,7 +944,7 @@ abstract class SelectArgument extends TextObject {
   private static findRightArgumentBoundary(
     document: TextDocument,
     position: Position,
-    ignoreSeparators: boolean = false
+    ignoreSeparators: boolean = false,
   ): Position | undefined {
     let delimiterPosition: Position | undefined;
     let walkingPosition = position;

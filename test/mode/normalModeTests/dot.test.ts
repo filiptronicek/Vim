@@ -1,18 +1,16 @@
 import { Mode } from '../../../src/mode/mode';
-import { Configuration } from '../../testConfiguration';
 import { newTest } from '../../testSimplifier';
-import { cleanUpWorkspace, setupWorkspace } from './../../testUtils';
+import { setupWorkspace } from './../../testUtils';
 
 suite('Dot Operator', () => {
-  setup(async () => {
-    const configuration = new Configuration();
-    configuration.tabstop = 4;
-    configuration.expandtab = false;
-
-    await setupWorkspace(configuration);
+  suiteSetup(async () => {
+    await setupWorkspace({
+      config: {
+        tabstop: 4,
+        expandtab: false,
+      },
+    });
   });
-
-  teardown(cleanUpWorkspace);
 
   newTest({
     title: "Can repeat '~' with <num>",
@@ -65,15 +63,14 @@ suite('Dot Operator', () => {
 });
 
 suite('Repeat content change', () => {
-  setup(async () => {
-    const configuration = new Configuration();
-    configuration.tabstop = 4;
-    configuration.expandtab = false;
-
-    await setupWorkspace(configuration);
+  suiteSetup(async () => {
+    await setupWorkspace({
+      config: {
+        tabstop: 4,
+        expandtab: false,
+      },
+    });
   });
-
-  teardown(cleanUpWorkspace);
 
   newTest({
     title: 'Can repeat `<BS>`',
@@ -218,29 +215,63 @@ suite('Repeat content change', () => {
     keysPressed: 'a<C-t>b<left>c<Esc>j.',
     end: ['\tonecb', 'tw|co'],
   });
+
+  newTest({
+    title: 'Can repeat change after v<Esc> and :<Esc>',
+    start: ['aaa bbb ccc dd|d'],
+    keysPressed: 'ciwxxx<Esc>' + 'bb.' + 'bbv<Esc>.' + 'bb:<Esc>.',
+    end: ['xx|x xxx xxx xxx'],
+  });
+
+  newTest({
+    title: 'Can repeat change after V<Esc> and <C-q><Esc>',
+    start: ['aaa bbb ccc dd|d'],
+    keysPressed: 'ciwxxx<Esc>' + 'bb.' + 'bbV<Esc>.' + 'bb<C-q><Esc>.',
+    end: ['xx|x xxx xxx xxx'],
+  });
+
+  newTest({
+    title: 'Can repeat insertion with increasing numbered register',
+    start: ['|1 2 3'],
+    keysPressed: '"1daw..' + '"1p..',
+    end: ['1 2 |3'],
+  });
+
+  newTest({
+    title: 'Does not increase the "0 register',
+    start: ['|lorem', 'ipsum'],
+    keysPressed: 'dd' + 'yy' + '"0p.',
+    end: ['ipsum', 'ipsum', '|ipsum'],
+  });
+
+  newTest({
+    title: 'Can repeat line insertion with 9 as highest numbered register',
+    start: ['|one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine'],
+    keysPressed: 'dd' + 'dd' + 'dd' + 'dd' + 'dd' + 'dd' + 'dd' + 'dd' + 'dd' + '"1p.........',
+    end: ['', 'nine', 'eight', 'seven', 'six', 'five', 'four', 'three', 'two', 'one', '|one'],
+  });
 });
 
 suite('Dot Operator repeat with remap', () => {
-  setup(async () => {
-    const configuration = new Configuration();
-    configuration.insertModeKeyBindings = [
-      {
-        before: ['j', 'j', 'k'],
-        after: ['<esc>'],
+  suiteSetup(async () => {
+    await setupWorkspace({
+      config: {
+        insertModeKeyBindings: [
+          {
+            before: ['j', 'j', 'k'],
+            after: ['<esc>'],
+          },
+        ],
+        normalModeKeyBindings: [
+          {
+            before: ['<leader>', 'w'],
+            after: ['d', 'w'],
+          },
+        ],
+        leader: ' ',
       },
-    ];
-    configuration.normalModeKeyBindings = [
-      {
-        before: ['<leader>', 'w'],
-        after: ['d', 'w'],
-      },
-    ];
-    configuration.leader = ' ';
-
-    await setupWorkspace(configuration);
+    });
   });
-
-  teardown(cleanUpWorkspace);
 
   newTest({
     title: "Can repeat content change using 'jjk' mapped to '<Esc>' without trailing characters",
@@ -254,5 +285,19 @@ suite('Dot Operator repeat with remap', () => {
     start: ['|one two three'],
     keysPressed: ' w.',
     end: ['|three'],
+  });
+
+  newTest({
+    title: 'Repeatable dot with insert mode',
+    start: ['|', ''],
+    keysPressed: 'ivar<Esc>j4.',
+    end: ['var', 'varvarvarva|r'],
+  });
+
+  newTest({
+    title: 'Repeatable dot with replace mode',
+    start: ['|aaaaa', 'aaaaa'],
+    keysPressed: 'r.j4.',
+    end: ['.aaaa', '...|.a'],
   });
 });

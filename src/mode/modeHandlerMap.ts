@@ -1,4 +1,4 @@
-import { Uri } from 'vscode';
+import { TextEditor, Uri } from 'vscode';
 import { ModeHandler } from './modeHandler';
 
 /**
@@ -7,13 +7,15 @@ import { ModeHandler } from './modeHandler';
 class ModeHandlerMapImpl {
   private modeHandlerMap = new Map<Uri, ModeHandler>();
 
-  public async getOrCreate(editorId: Uri): Promise<[ModeHandler, boolean]> {
+  public async getOrCreate(editor: TextEditor): Promise<[ModeHandler, boolean]> {
+    const editorId = editor.document.uri;
+
     let isNew = false;
     let modeHandler: ModeHandler | undefined = this.get(editorId);
 
     if (!modeHandler) {
       isNew = true;
-      modeHandler = await ModeHandler.create(this);
+      modeHandler = await ModeHandler.create(this, editor);
       this.modeHandlerMap.set(editorId, modeHandler);
     }
     return [modeHandler, isNew];
@@ -23,12 +25,8 @@ class ModeHandlerMapImpl {
     return this.modeHandlerMap.get(uri);
   }
 
-  public keys(): IterableIterator<Uri> {
-    return this.modeHandlerMap.keys();
-  }
-
-  public getAll(): ModeHandler[] {
-    return [...this.modeHandlerMap.values()];
+  public entries(): IterableIterator<[Uri, ModeHandler]> {
+    return this.modeHandlerMap.entries();
   }
 
   public delete(editorId: Uri) {

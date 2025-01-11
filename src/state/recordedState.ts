@@ -3,8 +3,10 @@ import { Mode, isVisualMode } from '../mode/mode';
 import { PositionDiff } from './../common/motion/position';
 import { Transformer } from './../transformations/transformer';
 import { SpecialKeys } from '../util/specialKeys';
-import type { VimState } from './vimState';
-import { Position } from 'vscode';
+import { IBaseAction, IBaseOperator, IBaseCommand } from '../actions/types';
+
+const ESCAPE_REGEX = new RegExp(/[|\\{}()[\]^$+*?.]/, 'g');
+const BUFFERED_KEYS_REGEX = new RegExp(SpecialKeys.TimeoutFinished, 'g');
 
 /**
  * Much of Vim's power comes from the composition of individual actions.
@@ -54,14 +56,14 @@ export class RecordedState {
       this.commandList.length > 0
     ) {
       // Used for the registers and macros that only record on commandList
-      result = this.commandList.join('');
+      // The commandList here saves the ex command, so we should not regex replace the
+      // leader key by the literal string '<leader>', as would have been done for a normal command.
+      return this.commandList.join('');
     }
-    const regexEscape = new RegExp(/[|\\{}()[\]^$+*?.]/, 'g');
-    const regexLeader = new RegExp(configuration.leader.replace(regexEscape, '\\$&'), 'g');
-    const regexBufferedKeys = new RegExp(SpecialKeys.TimeoutFinished, 'g');
-    result = result.replace(regexLeader, '<leader>').replace(regexBufferedKeys, '');
 
-    return result;
+    return result
+      .replace(new RegExp(configuration.leader.replace(ESCAPE_REGEX, '\\$&'), 'g'), '<leader>')
+      .replace(BUFFERED_KEYS_REGEX, '');
   }
 
   /**
@@ -78,19 +80,9 @@ export class RecordedState {
       // if there are any bufferedKeys waiting for other key append them
       result += this.bufferedKeys.join('');
     }
-    const regexEscape = new RegExp(/[|\\{}()[\]^$+*?.]/, 'g');
-    const regexLeader = new RegExp(configuration.leader.replace(regexEscape, '\\$&'), 'g');
-    const regexBufferedKeys = new RegExp(SpecialKeys.TimeoutFinished, 'g');
-    result = result.replace(regexLeader, '<leader>').replace(regexBufferedKeys, '');
-
-    return result;
-  }
-
-  /**
-   * Determines if the current command list is prefixed with a count
-   */
-  public get commandWithoutCountPrefix() {
-    return this.commandList.join('').replace(/^[0-9]+/g, '');
+    return result
+      .replace(new RegExp(configuration.leader.replace(ESCAPE_REGEX, '\\$&'), 'g'), '<leader>')
+      .replace(BUFFERED_KEYS_REGEX, '');
   }
 
   /**
@@ -196,14 +188,17 @@ export class RecordedState {
   }
 
   public get operators(): IBaseOperator[] {
-    return this.actionsRun.filter((a): a is IBaseOperator => a.isOperator).reverse();
+    return this.actionsRun.filter((a): a is IBaseOperator => a.actionType === 'operator').reverse();
   }
 
   /**
    * The command (e.g. i, ., R, /) the user wants to run, if there is one.
    */
   public get command(): IBaseCommand {
-    const list = this.actionsRun.filter((a): a is IBaseCommand => a.isCommand).reverse();
+    // TODO: this is probably wrong
+    const list = this.actionsRun
+      .filter((a): a is IBaseCommand => a.actionType === 'command')
+      .reverse();
 
     // TODO - disregard <Esc>, then assert this is of length 1.
 
@@ -260,7 +255,7 @@ export class RecordedState {
     }
 
     // We've got an operator - do we also have a motion or visual selection to operate on?
-    if (this.actionsRun.some((a) => a.isMotion) || isVisualMode(mode)) {
+    if (this.actionsRun.some((a) => a.actionType === 'motion') || isVisualMode(mode)) {
       return 'ready';
     }
 
@@ -275,26 +270,4 @@ export class RecordedState {
 
     return 'pending';
   }
-}
-
-export interface IBaseAction {
-  readonly isMotion: boolean;
-  readonly isOperator: boolean;
-  readonly isCommand: boolean;
-  readonly isJump: boolean;
-  readonly createsUndoPoint: boolean;
-
-  keysPressed: string[];
-  multicursorIndex: number | undefined;
-
-  readonly preservesDesiredColumn: boolean;
-}
-
-export interface IBaseCommand extends IBaseAction {
-  exec(position: Position, vimState: VimState): Promise<void>;
-}
-
-export interface IBaseOperator extends IBaseAction {
-  run(vimState: VimState, start: Position, stop: Position): Promise<void>;
-  runRepeat(vimState: VimState, position: Position, count: number): Promise<void>;
 }

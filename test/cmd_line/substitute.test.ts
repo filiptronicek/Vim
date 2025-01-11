@@ -1,4 +1,3 @@
-import { getAndUpdateModeHandler } from '../../extension';
 import { Globals } from '../../src/globals';
 import { cleanUpWorkspace, reloadConfiguration, setupWorkspace } from './../testUtils';
 import { newTest } from '../testSimplifier';
@@ -6,7 +5,7 @@ import { newTest } from '../testSimplifier';
 function sub(
   pattern: string,
   replace: string,
-  args?: { lineRange?: string; flags?: string; count?: number }
+  args?: { lineRange?: string; flags?: string; count?: number },
 ): string {
   const lineRange = args?.lineRange ?? '';
   const flags = args?.flags !== undefined ? `/${args.flags}` : '';
@@ -15,11 +14,7 @@ function sub(
 }
 
 suite('Basic substitute', () => {
-  setup(async () => {
-    await setupWorkspace();
-    await getAndUpdateModeHandler();
-  });
-
+  setup(setupWorkspace);
   suiteTeardown(cleanUpWorkspace);
 
   newTest({
@@ -242,6 +237,14 @@ suite('Basic substitute', () => {
     end: ['aba', 'dbd', '|dbc', ''],
   });
 
+  newTest({
+    title: '`n` flag (report count)',
+    start: ['apple', 'ban|ana', 'celery', 'dragonfruit'],
+    keysPressed: sub('a', '', { lineRange: '%', flags: 'gn' }),
+    end: ['apple', 'ban|ana', 'celery', 'dragonfruit'],
+    statusBar: '5 matches on 3 lines',
+  });
+
   suite('Effects of gdefault=true', () => {
     setup(async () => {
       Globals.mockConfiguration.gdefault = true;
@@ -340,6 +343,13 @@ suite('Basic substitute', () => {
     });
 
     newTest({
+      title: '`~` in replace string uses previous replace string',
+      start: ['|one two three', 'two three four'],
+      keysPressed: sub('two', 'xyz') + 'j' + sub('three', '~ ~'),
+      end: ['one xyz three', '|two xyz xyz four'],
+    });
+
+    newTest({
       title: 'Substitute with parameters should update search state',
       start: ['foo', 'bar', 'foo', 'bar|'],
       keysPressed:
@@ -418,11 +428,55 @@ suite('Basic substitute', () => {
       end: ['|foo tr tz'],
     });
 
+    suite('Change case', () => {
+      newTest({
+        title: '\\U',
+        start: ['|she sells seashells by the seashore'],
+        keysPressed: sub('s\\S*', '\\U&x', { flags: 'g' }),
+        end: ['|SHEX SELLSX SEASHELLSX by the SEASHOREX'],
+      });
+
+      newTest({
+        title: '\\U then \\E',
+        start: ['|she sells seashells by the seashore'],
+        keysPressed: sub('s\\S*', '\\U&\\Ex', { flags: 'g' }),
+        end: ['|SHEx SELLSx SEASHELLSx by the SEASHOREx'],
+      });
+
+      newTest({
+        title: '\\u',
+        start: ['|she sells seashells by the seashore'],
+        keysPressed: sub('s\\S*', '\\u&x', { flags: 'g' }),
+        end: ['|Shex Sellsx Seashellsx by the Seashorex'],
+      });
+
+      newTest({
+        title: '\\L',
+        start: ['|SHE SELLS SEASHELLS BY THE SEASHORE'],
+        keysPressed: sub('S\\S*', '\\L&X', { flags: 'g' }),
+        end: ['|shex sellsx seashellsx BY THE seashorex'],
+      });
+
+      newTest({
+        title: '\\L then \\E',
+        start: ['|SHE SELLS SEASHELLS BY THE SEASHORE'],
+        keysPressed: sub('S\\S*', '\\L&\\EX', { flags: 'g' }),
+        end: ['|sheX sellsX seashellsX BY THE seashoreX'],
+      });
+
+      newTest({
+        title: '\\l',
+        start: ['|SHE SELLS SEASHELLS BY THE SEASHORE'],
+        keysPressed: sub('S\\S*', '\\l&X', { flags: 'g' }),
+        end: ['|sHEX sELLSX sEASHELLSX BY THE sEASHOREX'],
+      });
+    });
+
     suite('Capture groups', () => {
       newTest({
-        title: '\\& capture group',
+        title: '& capture group',
         start: ['|she sells seashells by the seashore'],
-        keysPressed: sub('s\\S*', '(\\&)', { flags: 'g' }),
+        keysPressed: sub('s\\S*', '(&)', { flags: 'g' }),
         end: ['|(she) (sells) (seashells) by the (seashore)'],
       });
 
