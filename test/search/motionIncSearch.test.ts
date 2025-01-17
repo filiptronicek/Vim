@@ -1,15 +1,16 @@
-import { Configuration } from './testConfiguration';
-import { newTest } from './testSimplifier';
-import { cleanUpWorkspace, setupWorkspace } from './testUtils';
+import { newTest } from '../testSimplifier';
+import { cleanUpWorkspace, setupWorkspace } from '../testUtils';
 
 suite('incsearch motion', () => {
-  setup(async () => {
-    const configuration = new Configuration();
-    configuration.wrapscan = true;
-    configuration.incsearch = true;
-    await setupWorkspace(configuration);
+  suiteSetup(async () => {
+    await setupWorkspace({
+      config: {
+        wrapscan: true,
+        incsearch: true,
+      },
+    });
   });
-  teardown(cleanUpWorkspace);
+  suiteTeardown(cleanUpWorkspace);
 
   suite('<C-g>', () => {
     newTest({

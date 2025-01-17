@@ -1,11 +1,8 @@
-import { Configuration } from '../../testConfiguration';
 import { newTest, newTestSkip } from '../../testSimplifier';
 import { setupWorkspace } from '../../testUtils';
 
 suite('Undo', () => {
-  setup(async () => {
-    await setupWorkspace(new Configuration());
-  });
+  suiteSetup(setupWorkspace);
 
   suite('u', () => {
     newTest({

@@ -1,14 +1,7 @@
 import { Mode } from '../../../src/mode/mode';
 import { newTest } from '../../testSimplifier';
-import { cleanUpWorkspace, setupWorkspace } from '../../testUtils';
 
 suite('Mode Normal', () => {
-  setup(async () => {
-    await setupWorkspace();
-  });
-
-  teardown(cleanUpWorkspace);
-
   newTest({
     title: "Can handle 'x'",
     start: ['te|xt'],

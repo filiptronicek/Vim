@@ -1,4 +1,4 @@
-import { all, optWhitespace, Parser } from 'parsimmon';
+import { optWhitespace, Parser } from 'parsimmon';
 import { Position, Range } from 'vscode';
 import { PositionDiff } from '../../common/motion/position';
 import { ErrorCode, VimError } from '../../error';
@@ -34,7 +34,7 @@ export class CopyCommand extends ExCommand {
     }
 
     const copiedText = vimState.document.getText(
-      new Range(new Position(sourceStart, 0), new Position(sourceEnd, 0).getLineEnd())
+      new Range(new Position(sourceStart, 0), new Position(sourceEnd, 0).getLineEnd()),
     );
 
     let text: string;
@@ -50,15 +50,14 @@ export class CopyCommand extends ExCommand {
     const lines = copiedText.split('\n');
     const cursorPosition = new Position(
       Math.max(dest + lines.length, 0),
-      lines[lines.length - 1].match(/\S/)?.index ?? 0
+      lines[lines.length - 1].match(/\S/)?.index ?? 0,
     );
 
-    vimState.recordedState.transformer.addTransformation({
-      type: 'insertText',
+    vimState.recordedState.transformer.insert(
       position,
       text,
-      diff: PositionDiff.exactPosition(cursorPosition),
-    });
+      PositionDiff.exactPosition(cursorPosition),
+    );
   }
 
   public async execute(vimState: VimState): Promise<void> {

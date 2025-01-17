@@ -1,12 +1,16 @@
-import { newTest } from './testSimplifier';
-import { cleanUpWorkspace, setupWorkspace } from './testUtils';
+import { Mode } from '../src/mode/mode';
+import { newTest, newTestWithRemaps } from './testSimplifier';
+import { setupWorkspace } from './testUtils';
 
 suite('Record and execute a macro', () => {
   setup(async () => {
-    await setupWorkspace();
+    await setupWorkspace({
+      config: {
+        // for testing with <leader>
+        camelCaseMotion: { enable: true },
+      },
+    });
   });
-
-  teardown(cleanUpWorkspace);
 
   newTest({
     title: 'Can record and execute',
@@ -99,18 +103,37 @@ suite('Record and execute a macro', () => {
     end: ['|test'],
   });
 
-  newTest({
-    title: ': (command) register can be used as a macro to repeat :s',
-    start: ['|old', 'old', 'old'],
-    keysPressed: ':s/old/new\nj@:j@@',
-    end: ['new', 'new', '|new'],
+  suite('`:` (command) register used as macro', () => {
+    newTest({
+      title: 'Repeat :s',
+      start: ['|old', 'old', 'old'],
+      keysPressed: ':s/old/new\nj@:j@@',
+      end: ['new', 'new', '|new'],
+    });
+
+    newTest({
+      title: 'Repeat :d',
+      start: ['one', 't|wo', 'three', 'four', 'five'],
+      keysPressed: ':d/\n' + '@:' + '@@',
+      end: ['one', '|five'],
+    });
+
+    newTest({
+      title: 'Repeat :co',
+      start: ['|one', 'two'],
+      keysPressed: ':.co$\n' + '@:',
+      end: ['one', 'two', '|one', 'one'], // TODO: Cursor should be on line 3, not 4
+    });
   });
 
-  newTest({
-    title: ': (command) register can be used as a macro to repeat :d',
-    start: ['one', 't|wo', 'three', 'four', 'five'],
-    keysPressed: ':d/\n' + '@:' + '@@',
-    end: ['one', '|five'],
+  suite('`:` (command) register used as macro and command with leader key', () => {
+    newTest({
+      title: 'Repeat :s and command with leader key',
+      config: { leader: 'o' },
+      start: ['|old', 'old', 'old'],
+      keysPressed: ':s/old/new\nj@:j@@',
+      end: ['new', 'new', '|new'],
+    });
   });
 
   newTest({
@@ -161,11 +184,124 @@ suite('Record and execute a macro', () => {
     statusBar: "E354: Invalid register name: '~'",
   });
 
+  for (const register of ['%', '#']) {
+    newTest({
+      title: `Filename register '${register}' throw E354`,
+      start: ['one t|wo three'],
+      keysPressed: `@${register}`,
+      end: ['one t|wo three'],
+      statusBar: `E354: Invalid register name: '${register}'`,
+    });
+  }
+
   newTest({
     title: '`@@` before a macro has been run throws E748',
     start: ['one t|wo three'],
     keysPressed: '@@',
     end: ['one t|wo three'],
     statusBar: 'E748: No previously used register',
+  });
+
+  suite('Text copied into register can be run as a macro', () => {
+    const start = ['one', 'two', 'three'];
+    const register = 'x';
+    const testCases: Array<[string, string[]]> = [
+      ['', ['|one', 'two', 'three']],
+      ['j', ['one', '|two', 'three']],
+      ['2j', ['one', 'two', '|three']],
+
+      ['A' + ', uno<Esc>', ['one, un|o', 'two', 'three']],
+
+      ['dd', ['|two', 'three']],
+
+      ['yyp', ['one', '|one', 'two', 'three']],
+
+      ['VGJ', ['one two| three']],
+
+      ['gUU' + 'j.' + 'j.', ['ONE', 'TWO', '|THREE']],
+
+      [':2d\\n', ['one', '|three']],
+
+      ['jjl~l~0' + '<leader>w' + '<leader>w', ['one', 'two', 'tHr|Ee']],
+
+      // TODO: control characters...
+    ];
+    for (const [macro, end] of testCases) {
+      newTest({
+        title: `macro='${macro}'`,
+        start: [`|${macro}`, ...start],
+        keysPressed: `"${register}dd` + `@${register}`,
+        end,
+        endMode: Mode.Normal,
+      });
+    }
+
+    newTest({
+      title: `test @@ - 1`,
+      start: [`|j`, ...start],
+      keysPressed: `"${register}dd` + `@${register}` + `@@`,
+      end: ['one', 'two', '|three'],
+      endMode: Mode.Normal,
+    });
+
+    newTest({
+      title: `test @@ - 2`,
+      start: [`|dd`, ...start],
+      keysPressed: `"${register}dd` + `@${register}` + `@@`,
+      end: ['|three'],
+      endMode: Mode.Normal,
+    });
+
+    newTestWithRemaps({
+      title: 'test with remaps: simple',
+      start: [`|J`, ...start],
+      remaps: ['nmap J jj'],
+      steps: [
+        {
+          // Step 0:
+          keysPressed: `"${register}dd` + `@${register}`,
+          stepResult: {
+            end: ['one', 'two', '|three'],
+          },
+        },
+      ],
+    });
+
+    newTestWithRemaps({
+      title: 'test with remaps: repeat',
+      start: [`|Pm`, ...start],
+      remaps: ['nmap Pm Cabc<Esc>'],
+      steps: [
+        {
+          // Step 0:
+          keysPressed: `"${register}dd` + `@${register}`,
+          stepResult: {
+            end: ['ab|c', 'two', 'three'],
+          },
+        },
+        {
+          // Step 1:
+          keysPressed: 'j0' + `@@`,
+          stepResult: {
+            end: ['abc', 'ab|c', 'three'],
+          },
+        },
+      ],
+    });
+
+    newTestWithRemaps({
+      title: 'test with remaps: leader',
+      start: [`|<leader>J`, ...start],
+      remaps: ['nmap <leader>J jj'],
+      steps: [
+        {
+          // Step 0:
+          keysPressed: `"${register}dd` + `@${register}`,
+          stepResult: {
+            end: ['one', 'two', '|three'],
+          },
+        },
+      ],
+    });
   });
 });

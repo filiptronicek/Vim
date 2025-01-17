@@ -1,31 +1,32 @@
+import { Position, Range, window } from 'vscode';
 import { VimState } from '../../state/vimState';
-import { PositionDiff, sorted } from './../../common/motion/position';
-import { configuration } from './../../configuration/configuration';
-import { Mode } from './../../mode/mode';
-import { RegisterAction, BaseCommand } from './../base';
+import {
+  SelectABigWord,
+  SelectInnerWord,
+  SelectWord,
+  TextObject,
+} from '../../textobject/textobject';
+import { isIMovement } from '../baseMotion';
 import {
   MoveAroundBacktick,
   MoveAroundCaret,
   MoveAroundCurlyBrace,
   MoveAroundDoubleQuotes,
   MoveAroundParentheses,
-  MoveAroundTag,
   MoveAroundSingleQuotes,
   MoveAroundSquareBracket,
+  MoveAroundTag,
+  MoveFullWordBegin,
   MoveInsideCharacter,
   MoveInsideTag,
   MoveQuoteMatch,
+  MoveWordBegin,
 } from '../motion';
-import { isIMovement } from '../baseMotion';
-import { MoveFullWordBegin, MoveWordBegin } from '../motion';
+import { PositionDiff, sorted } from './../../common/motion/position';
+import { configuration } from './../../configuration/configuration';
+import { DotCommandStatus, Mode } from './../../mode/mode';
+import { BaseCommand, RegisterAction } from './../base';
 import { BaseOperator } from './../operator';
-import {
-  SelectInnerWord,
-  TextObject,
-  SelectABigWord,
-  SelectWord,
-} from '../../textobject/textobject';
-import { Position, Range, window } from 'vscode';
 
 type SurroundEdge = {
   leftEdge: Range;
@@ -55,6 +56,9 @@ export interface SurroundState {
 
   /** name of tag */
   tag?: TagReplacement;
+
+  /** name of function */
+  function?: string;
 
   /** for visual line mode */
   addNewline?: boolean;
@@ -88,17 +92,7 @@ class YankSurroundOperator extends SurroundOperator {
         previousMode: vimState.currentMode,
       };
     }
-    // then collect ranges for all cursors
-    const multicursorIndex = this.multicursorIndex ?? 0;
-    vimState.surround!.edges.push(getYankRanges());
-    vimState.cursorStartPosition = start;
-    // when called from visual operator, use end for stop to keep visual selection
-    vimState.cursorStopPosition = vimState.currentMode === Mode.Visual ? end : start;
-    await vimState.setCurrentMode(Mode.SurroundInputMode);
-
-    return;
-
-    function getYankRanges(): SurroundEdge {
+    const getYankRanges = (): SurroundEdge => {
       // for special handling for w motion.
       // with "|surroundme ZONK" it will jump to Z, but we just want surroundme
       const endPlus1 = new Range(end.getRight(), end.getRight());
@@ -117,13 +111,20 @@ class YankSurroundOperator extends SurroundOperator {
         rightEdge,
         cursorIndex: multicursorIndex,
       };
-    }
+    };
+    // then collect ranges for all cursors
+    const multicursorIndex = this.multicursorIndex ?? 0;
+    vimState.surround!.edges.push(getYankRanges());
+    vimState.cursorStartPosition = start;
+    // when called from visual operator, use end for stop to keep visual selection
+    vimState.cursorStopPosition = vimState.currentMode === Mode.Visual ? end : start;
+    await vimState.setCurrentMode(Mode.SurroundInputMode);
   }
 
   public override async runRepeat(
     vimState: VimState,
     position: Position,
-    count: number
+    count: number,
   ): Promise<void> {
     // we want to act on range: first non whitespace to last non whitespace
     await this.run(
@@ -132,7 +133,7 @@ class YankSurroundOperator extends SurroundOperator {
       position
         .getDown(Math.max(0, count - 1))
         .getLineEnd()
-        .prevWordEnd(vimState.document)
+        .prevWordEnd(vimState.document),
     );
   }
 }
@@ -209,6 +210,7 @@ class CommandSurroundDeleteSurround extends CommandSurround {
     // for derived class, support ds2X
     if (this.keysHasCnt) {
       const cntKey = this.keysPressed[this.keysPressed.length - 2];
+      // eslint-disable-next-line radix
       vimState.recordedState.count = parseInt(cntKey, undefined);
     }
 
@@ -225,7 +227,7 @@ class CommandSurroundDeleteSurround extends CommandSurround {
     const replaceRanges = await SurroundHelper.getReplaceRanges(
       vimState,
       position,
-      this.multicursorIndex ?? 0
+      this.multicursorIndex ?? 0,
     );
 
     if (replaceRanges) {
@@ -253,6 +255,7 @@ class CommandSurroundChangeSurround extends CommandSurround {
     // for derived class, support ds2X
     if (this.keysHasCnt) {
       const cntKey = this.keysPressed[this.keysPressed.length - 2];
+      // eslint-disable-next-line radix
       vimState.recordedState.count = parseInt(cntKey, undefined);
     }
 
@@ -271,7 +274,7 @@ class CommandSurroundChangeSurround extends CommandSurround {
     const replaceRanges = await SurroundHelper.getReplaceRanges(
       vimState,
       position,
-      this.multicursorIndex ?? 0
+      this.multicursorIndex ?? 0,
     );
 
     // collect ranges for all cursors
@@ -304,7 +307,10 @@ class CommandSurroundAddSurrounding extends BaseCommand {
       configuration.surround &&
       super.doesActionApply(vimState, keysPressed) &&
       replacement !== 't' && // do not run this for surrounding with a tag
-      replacement !== '<'
+      replacement !== '<' &&
+      replacement !== 'f' && // or for surrounding with a function
+      replacement !== 'F' &&
+      replacement !== '<C-f>'
     );
   }
 
@@ -342,7 +348,7 @@ export class CommandSurroundAddSurroundingTag extends BaseCommand {
 
     vimState.surround.replacement = 't';
     const tagInput =
-      vimState.isRunningDotCommand || vimState.isReplayingMacro
+      vimState.dotCommandStatus === DotCommandStatus.Executing || vimState.isReplayingMacro
         ? this.recordedTag
         : await this.readTag();
 
@@ -355,18 +361,18 @@ export class CommandSurroundAddSurroundingTag extends BaseCommand {
     // record tag for repeat. this works because recordedState will store the actual objects
     this.recordedTag = tagInput;
 
+    // local helper
+    const checkReplaceAttributes = (tag: string) => {
+      return tag.substring(tag.length - 1) === '>'
+        ? { tag: tag.substring(0, tag.length - 1), keepAttributes: false }
+        : { tag, keepAttributes: true };
+    };
+
     // check as special case (set by >) if we want to replace the attributes on tag or keep them (default)
     vimState.surround.tag = checkReplaceAttributes(tagInput);
 
     // finally, we can exec surround
     await SurroundHelper.ExecuteSurround(vimState);
-
-    // local helper
-    function checkReplaceAttributes(tag: string) {
-      return tag.substring(tag.length - 1) === '>'
-        ? { tag: tag.substring(0, tag.length - 1), keepAttributes: false }
-        : { tag, keepAttributes: true };
-    }
   }
 
   private async readTag(): Promise<string | undefined> {
@@ -374,6 +380,66 @@ export class CommandSurroundAddSurroundingTag extends BaseCommand {
       prompt: 'Enter tag',
       ignoreFocusOut: true,
     });
+  }
+}
+
+@RegisterAction
+export class CommandSurroundAddSurroundingFunction extends BaseCommand {
+  modes = [Mode.SurroundInputMode];
+  // add surrounding / read X when: ys + motion + X
+  keys = [['f'], ['F'], ['<C-f>']];
+  override isCompleteAction = true;
+  recordedFunction = ''; // to save for repeat
+  override runsOnceForEveryCursor() {
+    return false;
+  }
+  public override async exec(position: Position, vimState: VimState): Promise<void> {
+    if (!vimState.surround) {
+      return;
+    }
+
+    // reuse the spacing logic from the parentheses
+    // for the right side of the replacement
+    vimState.surround.replacement =
+      this.keysPressed[this.keysPressed.length - 1] === 'F' ? '(' : ')';
+
+    const functionInput =
+      vimState.dotCommandStatus === DotCommandStatus.Executing || vimState.isReplayingMacro
+        ? this.recordedFunction
+        : await this.readFunction();
+
+    if (!functionInput) {
+      vimState.surround = undefined;
+      await vimState.setCurrentMode(Mode.Normal);
+      return;
+    }
+
+    // record function for repeat.
+    this.recordedFunction = functionInput;
+
+    // format the left side of the replacement based on the key pressed
+    vimState.surround.function = this.formatFunction(functionInput);
+
+    await SurroundHelper.ExecuteSurround(vimState);
+  }
+
+  private async readFunction(): Promise<string | undefined> {
+    return window.showInputBox({
+      prompt: 'Enter function',
+      ignoreFocusOut: true,
+    });
+  }
+
+  private formatFunction(fn: string): string {
+    switch (this.keysPressed[this.keysPressed.length - 1]) {
+      case 'f':
+        return fn + '(';
+      case 'F':
+        return fn + '( ';
+      case '<C-f>':
+      default:
+        return '(' + fn + ' ';
+    }
   }
 }
 
@@ -454,7 +520,7 @@ class SurroundHelper {
   public static async getReplaceRanges(
     vimState: VimState,
     position: Position,
-    multicursorIndex: number
+    multicursorIndex: number,
   ): Promise<SurroundEdge | undefined> {
     /* so this method is a bit of a dumpster for edge cases and ugly details
     the main idea is this:
@@ -484,11 +550,8 @@ class SurroundHelper {
     let rangeStart = targetMovement.start;
     let rangeEnd = targetMovement.stop;
 
-    // good to go, now we can calculate our ranges based on rangeStart and rangeEnd
-    return vimState.surround.target === 't' ? getAdjustedRangesForTag() : getAdjustedRanges();
-
     // some local helpers
-    function getAdjustedRanges(): SurroundEdge {
+    const getAdjustedRanges = (): SurroundEdge => {
       if (movement() instanceof MoveInsideCharacter) {
         // for parens, brackets, curly ... we have to adjust the right range
         // there seems to be inconsistency between MoveInsideCharacter and MoveQuoteMatch
@@ -507,17 +570,16 @@ class SurroundHelper {
         rightEdge: new Range(rangeEnd.getLeft(delSpace), rangeEnd.getRight()),
         cursorIndex: multicursorIndex,
       };
-    }
-
-    function checkRemoveSpace(): number {
+    };
+    const checkRemoveSpace = (): number => {
       // capiche?
       const leftSpace = vimState.editor.document.getText(
-        new Range(rangeStart.getRight(), rangeStart.getRight(2))
+        new Range(rangeStart.getRight(), rangeStart.getRight(2)),
       );
       const rightSpace = vimState.editor.document.getText(new Range(rangeEnd.getLeft(), rangeEnd));
       return removeSpace && leftSpace === ' ' && rightSpace === ' ' ? 1 : 0;
-    }
-    async function getAdjustedRangesForTag(): Promise<SurroundEdge | undefined> {
+    };
+    const getAdjustedRangesForTag = async (): Promise<SurroundEdge | undefined> => {
       // we are on start of opening tag and end of closing tag
       // return ranges from there to the other side
       // start -> <foo>bar</foo> <-- stop
@@ -547,7 +609,10 @@ class SurroundHelper {
           cursorIndex: multicursorIndex,
         };
       }
-    }
+    };
+
+    // good to go, now we can calculate our ranges based on rangeStart and rangeEnd
+    return vimState.surround.target === 't' ? getAdjustedRangesForTag() : getAdjustedRanges();
   }
 
   /** executes our prepared surround changes */
@@ -580,15 +645,17 @@ class SurroundHelper {
         surroundState.operator === 'delete'
           ? ''
           : surroundState.tag
-          ? '<' + surroundState.tag.tag + '>' + optNewline
-          : replacement.left + optNewline;
+            ? '<' + surroundState.tag.tag + '>' + optNewline
+            : surroundState.function
+              ? surroundState.function + optNewline
+              : replacement.left + optNewline;
 
       const rightFixed =
         surroundState.operator === 'delete'
           ? ''
           : surroundState.tag
-          ? optNewline + '</' + surroundState.tag.tag + '>'
-          : optNewline + replacement.right;
+            ? optNewline + '</' + SurroundHelper.trimAttributes(surroundState.tag.tag) + '>'
+            : optNewline + replacement.right;
 
       for (const { leftEdge, rightEdge, cursorIndex } of surroundState.edges) {
         vimState.recordedState.transformer.addTransformation({
@@ -599,7 +666,7 @@ class SurroundHelper {
           // keep cursor on left edge / start. todo: not completly correct vor visual S
           diff:
             surroundState.operator === 'yank'
-              ? PositionDiff.offset({ character: 1 - leftFixed.length })
+              ? PositionDiff.offset({ character: -leftFixed.length })
               : undefined,
         });
         vimState.recordedState.transformer.addTransformation({
@@ -612,5 +679,11 @@ class SurroundHelper {
 
     // finish / cleanup. sql-koala was here :D
     await vimState.setCurrentMode(Mode.Normal);
+  }
+
+  private static trimAttributes(wholeTag: string) {
+    const endTagIndex = wholeTag.indexOf(' ');
+    const isAnyAttributeAfterTag = endTagIndex !== -1;
+    return isAnyAttributeAfterTag ? wholeTag.substring(0, endTagIndex) : wholeTag;
   }
 }

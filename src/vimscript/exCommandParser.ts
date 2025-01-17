@@ -1,3 +1,4 @@
+// eslint-disable-next-line id-denylist
 import { all, alt, optWhitespace, Parser, regexp, seq, string, succeed } from 'parsimmon';
 import { AsciiCommand } from '../cmd_line/commands/ascii';
 import { BangCommand } from '../cmd_line/commands/bang';
@@ -9,21 +10,28 @@ import { DeleteCommand } from '../cmd_line/commands/delete';
 import { DigraphsCommand } from '../cmd_line/commands/digraph';
 import { FileCommand } from '../cmd_line/commands/file';
 import { FileInfoCommand } from '../cmd_line/commands/fileInfo';
+import { EchoCommand } from '../cmd_line/commands/echo';
 import { GotoCommand } from '../cmd_line/commands/goto';
 import { GotoLineCommand } from '../cmd_line/commands/gotoLine';
 import { HistoryCommand } from '../cmd_line/commands/history';
 import { ClearJumpsCommand, JumpsCommand } from '../cmd_line/commands/jumps';
 import { CenterCommand, LeftCommand, RightCommand } from '../cmd_line/commands/leftRightCenter';
 import { DeleteMarksCommand, MarksCommand } from '../cmd_line/commands/marks';
+import { ExploreCommand } from '../cmd_line/commands/explore';
+import { MoveCommand } from '../cmd_line/commands/move';
 import { NohlCommand } from '../cmd_line/commands/nohl';
+import { NormalCommand } from '../cmd_line/commands/normal';
 import { OnlyCommand } from '../cmd_line/commands/only';
 import { PrintCommand } from '../cmd_line/commands/print';
 import { PutExCommand } from '../cmd_line/commands/put';
 import { QuitCommand } from '../cmd_line/commands/quit';
 import { ReadCommand } from '../cmd_line/commands/read';
+import { RedoCommand } from '../cmd_line/commands/redo';
 import { RegisterCommand } from '../cmd_line/commands/register';
+import { RetabCommand } from '../cmd_line/commands/retab';
 import { SetCommand } from '../cmd_line/commands/set';
 import { ShCommand } from '../cmd_line/commands/sh';
+import { ShiftCommand } from '../cmd_line/commands/shift';
 import { SmileCommand } from '../cmd_line/commands/smile';
 import { SortCommand } from '../cmd_line/commands/sort';
 import { SubstituteCommand } from '../cmd_line/commands/substitute';
@@ -42,6 +50,8 @@ import { StatusBar } from '../statusBar';
 import { ExCommand } from './exCommand';
 import { LineRange } from './lineRange';
 import { nameAbbrevParser } from './parserUtils';
+import { LetCommand } from '../cmd_line/commands/let';
+import { CallCommand, EvalCommand } from '../cmd_line/commands/eval';
 
 type ArgParser = Parser<ExCommand>;
 
@@ -56,12 +66,12 @@ export const builtinExCommands: ReadonlyArray<[[string, string], ArgParser | und
   [['', ''], succeed(new GotoLineCommand())],
   [['!', ''], BangCommand.argParser],
   [['#', ''], PrintCommand.argParser({ printNumbers: true, printText: true })],
-  // TODO: Ignore #! (shebang)
+  [['#!', ''], all.map((_) => new NoOpCommand())],
   [['&', ''], undefined],
   [['*', ''], undefined],
-  [['<', ''], undefined],
+  [['<', ''], ShiftCommand.argParser('<')],
   [['=', ''], PrintCommand.argParser({ printNumbers: true, printText: false })],
-  [['>', ''], undefined],
+  [['>', ''], ShiftCommand.argParser('>')],
   [['@', ''], undefined],
   [['@@', ''], undefined],
   [['N', 'ext'], undefined],
@@ -84,7 +94,7 @@ export const builtinExCommands: ReadonlyArray<[[string, string], ArgParser | und
   [['au', 'tocmd'], undefined],
   [['aug', 'roup'], undefined],
   [['aun', 'menu'], undefined],
-  [['b', 'uffer'], undefined],
+  [['b', 'uffer'], TabCommand.argParsers.buffer],
   [['bN', 'ext'], TabCommand.argParsers.bprev],
   [['ba', 'll'], undefined],
   [['bad', 'd'], undefined],
@@ -92,13 +102,13 @@ export const builtinExCommands: ReadonlyArray<[[string, string], ArgParser | und
   [['bd', 'elete'], BufferDeleteCommand.argParser],
   [['be', 'have'], undefined],
   [['bel', 'owright'], undefined],
-  [['bf', 'irst'], undefined],
-  [['bl', 'ast'], undefined],
+  [['bf', 'irst'], TabCommand.argParsers.bfirst],
+  [['bl', 'ast'], TabCommand.argParsers.blast],
   [['bm', 'odified'], undefined],
   [['bn', 'ext'], TabCommand.argParsers.bnext],
   [['bo', 'tright'], undefined],
   [['bp', 'revious'], TabCommand.argParsers.bprev],
-  [['br', 'ewind'], undefined],
+  [['br', 'ewind'], TabCommand.argParsers.bfirst],
   [['brea', 'k'], undefined],
   [['breaka', 'dd'], Breakpoints.argParsers.add],
   [['breakd', 'el'], Breakpoints.argParsers.del],
@@ -118,14 +128,14 @@ export const builtinExCommands: ReadonlyArray<[[string, string], ArgParser | und
   [['cadde', 'xpr'], undefined],
   [['caddf', 'ile'], undefined],
   [['caf', 'ter'], undefined],
-  [['cal', 'l'], undefined],
+  [['cal', 'l'], CallCommand.argParser],
   [['cat', 'ch'], undefined],
   [['cb', 'uffer'], undefined],
   [['cbef', 'ore'], undefined],
   [['cbel', 'ow'], undefined],
   [['cbo', 'ttom'], undefined],
   [['cc', ''], undefined],
-  [['ccl', 'ose'], undefined],
+  [['ccl', 'ose'], succeed(new VsCodeCommand('workbench.action.closePanel'))],
   [['cd', ''], undefined],
   [['cdo', ''], undefined],
   [['ce', 'nter'], CenterCommand.argParser],
@@ -149,9 +159,9 @@ export const builtinExCommands: ReadonlyArray<[[string, string], ArgParser | und
   [['cm', 'ap'], undefined],
   [['cmapc', 'lear'], undefined],
   [['cme', 'nu'], undefined],
-  [['cn', 'ext'], undefined],
+  [['cn', 'ext'], succeed(new VsCodeCommand('editor.action.marker.nextInFiles'))],
   [['cnew', 'er'], undefined],
-  [['cnf', 'ile'], undefined],
+  [['cnf', 'ile'], succeed(new VsCodeCommand('editor.action.marker.nextInFiles'))],
   [['cno', 'remap'], undefined],
   [['cnorea', 'bbrev'], undefined],
   [['cnoreme', 'nu'], undefined],
@@ -163,10 +173,10 @@ export const builtinExCommands: ReadonlyArray<[[string, string], ArgParser | und
   [['comp', 'iler'], undefined],
   [['con', 'tinue'], undefined],
   [['conf', 'irm'], undefined],
-  [['cons', 't'], undefined],
-  [['cope', 'n'], undefined],
-  [['cp', 'revious'], undefined],
-  [['cpf', 'ile'], undefined],
+  [['cons', 't'], LetCommand.argParser(true)],
+  [['cope', 'n'], succeed(new VsCodeCommand('workbench.panel.markers.view.focus'))],
+  [['cp', 'revious'], succeed(new VsCodeCommand('editor.action.marker.prevInFiles'))],
+  [['cpf', 'ile'], succeed(new VsCodeCommand('editor.action.marker.prevInFiles'))],
   [['cq', 'uit'], undefined],
   [['cr', 'ewind'], undefined],
   [['cs', 'cope'], undefined],
@@ -174,7 +184,7 @@ export const builtinExCommands: ReadonlyArray<[[string, string], ArgParser | und
   [['cu', 'nmap'], undefined],
   [['cuna', 'bbrev'], undefined],
   [['cunme', 'nu'], undefined],
-  [['cw', 'indow'], undefined],
+  [['cw', 'indow'], succeed(new VsCodeCommand('workbench.panel.markers.view.focus'))],
   [['d', 'elete'], DeleteCommand.argParser],
   [['deb', 'ug'], undefined],
   [['debugg', 'reedy'], undefined],
@@ -200,11 +210,11 @@ export const builtinExCommands: ReadonlyArray<[[string, string], ArgParser | und
   [['dsp', 'lit'], undefined],
   [['e', 'dit'], FileCommand.argParsers.edit],
   [['ea', 'rlier'], undefined],
-  [['ec', 'ho'], undefined],
-  [['echoe', 'rr'], undefined],
+  [['ec', 'ho'], EchoCommand.argParser({ sep: ' ', error: false })],
+  [['echoe', 'rr'], EchoCommand.argParser({ sep: ' ', error: true })],
   [['echoh', 'l'], undefined],
   [['echom', 'sg'], undefined],
-  [['echon', ''], undefined],
+  [['echon', ''], EchoCommand.argParser({ sep: '', error: false })],
   [['el', 'se'], undefined],
   [['elsei', 'f'], undefined],
   [['em', 'enu'], undefined],
@@ -214,10 +224,11 @@ export const builtinExCommands: ReadonlyArray<[[string, string], ArgParser | und
   [['endt', 'ry'], undefined],
   [['endw', 'hile'], undefined],
   [['ene', 'w'], FileCommand.argParsers.enew],
-  [['ev', 'al'], undefined],
+  [['ev', 'al'], EvalCommand.argParser],
   [['ex', ''], FileCommand.argParsers.edit],
   [['exe', 'cute'], undefined],
   [['exi', 't'], WriteQuitCommand.argParser],
+  [['Ex', 'plore'], succeed(new ExploreCommand())],
   [['exu', 'sage'], undefined],
   [['f', 'ile'], FileInfoCommand.argParser],
   [['files', ''], undefined],
@@ -290,12 +301,12 @@ export const builtinExCommands: ReadonlyArray<[[string, string], ArgParser | und
   [['lbo', 'ttom'], undefined],
   [['lc', 'd'], undefined],
   [['lch', 'dir'], undefined],
-  [['lcl', 'ose'], undefined],
+  [['lcl', 'ose'], succeed(new VsCodeCommand('workbench.action.closePanel'))],
   [['lcs', 'cope'], undefined],
   [['ld', 'o'], undefined],
   [['le', 'ft'], LeftCommand.argParser],
   [['lefta', 'bove'], undefined],
-  [['let', ''], undefined],
+  [['let', ''], LetCommand.argParser(false)],
   [['lex', 'pr'], undefined],
   [['lf', 'ile'], undefined],
   [['lfd', 'o'], undefined],
@@ -314,7 +325,7 @@ export const builtinExCommands: ReadonlyArray<[[string, string], ArgParser | und
   [['lmak', 'e'], undefined],
   [['lmapc', 'lear'], undefined],
   [['ln', 'oremap'], undefined],
-  [['lne', 'xt'], undefined],
+  [['lne', 'xt'], succeed(new VsCodeCommand('editor.action.nextCommentThreadAction'))],
   [['lnew', 'er'], undefined],
   [['lnf', 'ile'], undefined],
   [['lo', 'adview'], undefined],
@@ -322,11 +333,14 @@ export const builtinExCommands: ReadonlyArray<[[string, string], ArgParser | und
   [['loc', 'kmarks'], undefined],
   [['lockv', 'ar'], undefined],
   [['lol', 'der'], undefined],
-  [['lope', 'n'], undefined],
-  [['lp', 'revious'], undefined],
+  [['lope', 'n'], succeed(new VsCodeCommand('workbench.action.focusCommentsPanel'))],
+  [['lp', 'revious'], succeed(new VsCodeCommand('editor.action.previousCommentThreadAction'))],
   [['lpf', 'ile'], undefined],
   [['lr', 'ewind'], undefined],
-  [['ls', ''], undefined],
+  [
+    ['ls', ''],
+    succeed(new VsCodeCommand('workbench.action.quickOpenLeastRecentlyUsedEditorInGroup')),
+  ],
   [['lt', 'ag'], undefined],
   [['lu', 'nmap'], undefined],
   [['lua', ''], undefined],
@@ -334,8 +348,8 @@ export const builtinExCommands: ReadonlyArray<[[string, string], ArgParser | und
   [['luaf', 'ile'], undefined],
   [['lv', 'imgrep'], undefined],
   [['lvimgrepa', 'dd'], undefined],
-  [['lw', 'indow'], undefined],
-  [['m', 'ove'], undefined],
+  [['lw', 'indow'], succeed(new VsCodeCommand('workbench.action.focusCommentsPanel'))],
+  [['m', 'ove'], MoveCommand.argParser],
   [['ma', 'rk'], undefined],
   [['mak', 'e'], undefined],
   [['map', ''], undefined],
@@ -363,7 +377,7 @@ export const builtinExCommands: ReadonlyArray<[[string, string], ArgParser | und
   [['noh', 'lsearch'], succeed(new NohlCommand())],
   [['norea', 'bbrev'], undefined],
   [['noreme', 'nu'], undefined],
-  [['norm', 'al'], undefined],
+  [['norm', 'al'], NormalCommand.argParser],
   [['nos', 'wapfile'], undefined],
   [['nu', 'mber'], PrintCommand.argParser({ printNumbers: true, printText: true })],
   [['nun', 'map'], undefined],
@@ -422,14 +436,14 @@ export const builtinExCommands: ReadonlyArray<[[string, string], ArgParser | und
   [['quita', 'll'], QuitCommand.argParser(true)],
   [['r', 'ead'], ReadCommand.argParser],
   [['rec', 'over'], undefined],
-  [['red', 'o'], undefined],
+  [['red', 'o'], RedoCommand.argParser],
   [['redi', 'r'], undefined],
   [['redr', 'aw'], undefined],
   [['redraws', 'tatus'], undefined],
   [['redrawt', 'abline'], undefined],
   [['reg', 'isters'], RegisterCommand.argParser],
   [['res', 'ize'], undefined],
-  [['ret', 'ab'], undefined],
+  [['ret', 'ab'], RetabCommand.argParser],
   [['retu', 'rn'], undefined],
   [['rew', 'ind'], undefined],
   [['ri', 'ght'], RightCommand.argParser],
@@ -523,7 +537,7 @@ export const builtinExCommands: ReadonlyArray<[[string, string], ArgParser | und
   [['tabnew', ''], TabCommand.argParsers.tabnew],
   [['tabo', 'nly'], TabCommand.argParsers.tabonly],
   [['tabp', 'revious'], TabCommand.argParsers.bprev],
-  [['tabr', 'ewind'], undefined],
+  [['tabr', 'ewind'], TabCommand.argParsers.bfirst],
   [['tabs', ''], undefined],
   [['tags', ''], undefined],
   [['tc', 'd'], undefined],
@@ -620,7 +634,7 @@ class UnimplementedCommand extends ExCommand {
     StatusBar.setText(
       vimState,
       `Command :${this.name} is not yet implemented (PRs are welcome!)`,
-      true
+      true,
     );
   }
 
@@ -629,9 +643,15 @@ class UnimplementedCommand extends ExCommand {
   }
 }
 
+export class NoOpCommand extends ExCommand {
+  async execute(vimState: VimState): Promise<void> {
+    // nothing
+  }
+}
+
 function nameParser(
   name: [string, string],
-  argParser: ArgParser | undefined
+  argParser: ArgParser | undefined,
 ): Parser<Parser<ExCommand>> {
   argParser ??= all.result(new UnimplementedCommand(name[1] ? `${name[0]}[${name[1]}]` : name[0]));
 
@@ -643,7 +663,7 @@ function nameParser(
 export const commandNameParser: Parser<Parser<ExCommand> | undefined> = alt(
   ...[...builtinExCommands]
     .reverse()
-    .map(([name, argParser]) => nameParser(name, argParser?.skip(optWhitespace)))
+    .map(([name, argParser]) => nameParser(name, argParser?.skip(optWhitespace))),
 );
 
 export const exCommandParser: Parser<{ lineRange: LineRange | undefined; command: ExCommand }> =
@@ -654,14 +674,14 @@ export const exCommandParser: Parser<{ lineRange: LineRange | undefined; command
         LineRange.parser.fallback(undefined),
         optWhitespace,
         commandNameParser.fallback(undefined),
-        all
-      )
+        all,
+      ),
     )
     .map(([lineRange, whitespace, parseArgs, args]) => {
       if (parseArgs === undefined) {
         throw VimError.fromCode(
           ErrorCode.NotAnEditorCommand,
-          `${lineRange?.toString() ?? ''}${whitespace}${args}`
+          `${lineRange?.toString() ?? ''}${whitespace}${args}`,
         );
       }
       const result = seq(parseArgs, optWhitespace.then(all)).parse(args);

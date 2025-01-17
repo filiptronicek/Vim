@@ -1,4 +1,4 @@
-import { Range, DecorationOptions } from 'vscode';
+import { DecorationOptions, Range } from 'vscode';
 
 /**
  * Alias for the types of arrays that can be passed to a TextEditor's setDecorations method
@@ -24,7 +24,7 @@ export type SearchDecorations = {
  * character.
  */
 export function ensureVisible(range: Range): DecorationOptions {
-  return range.start.isLineEnd() && (range.isEmpty || range.end.isLineBeginning())
+  return (range.isEmpty || range.end.isLineBeginning()) && range.start.isLineEnd()
     ? {
         // range is at EOL, possibly containing EOL char(s).
         range: range.with(undefined, range.start),
@@ -36,8 +36,8 @@ export function ensureVisible(range: Range): DecorationOptions {
         },
       }
     : range.isEmpty
-    ? { range: range.with(undefined, range.end.translate(0, 1)) } // extend range one character right
-    : { range };
+      ? { range: range.with(undefined, range.end.translate(0, 1)) } // extend range one character right
+      : { range };
 }
 
 /**
@@ -46,7 +46,7 @@ export function ensureVisible(range: Range): DecorationOptions {
 export function formatDecorationText(
   text: string,
   tabsize: number,
-  newlineReplacement: string | ((substring: string, ...args: any[]) => string) = '\u23ce' // "⏎" RETURN SYMBOL
+  newlineReplacement: string | ((substring: string, ...args: any[]) => string) = '\u23ce', // "⏎" RETURN SYMBOL
 ) {
   // surround with zero-width space to prevent trimming
   return `\u200b${text
@@ -54,20 +54,16 @@ export function formatDecorationText(
     .replace(/ /g, '\u00a0') // " " NO-BREAK SPACE
     .replace(/\t/g, '\u00a0'.repeat(tabsize))
     // Decorations can't change the apparent # of lines in the editor, so we must settle for a single-line version of our text
-    .replace(/\r\n|[\r\n]/g, newlineReplacement as any)}\u200b`;
+    .replace(/\r\n|[\r\n]/g, newlineReplacement as string)}\u200b`;
 }
 
 /**
  * @returns search decorations for the given ranges, taking into account the current match
  */
 export function getDecorationsForSearchMatchRanges(
-  ranges: Range[] | undefined,
-  currentMatchIndex?: number
+  ranges: Range[],
+  currentMatchIndex?: number,
 ): SearchDecorations {
-  if (ranges === undefined) {
-    return {};
-  }
-
   const searchHighlight: DecorationOptions[] = [];
   const searchMatch: DecorationOptions[] = [];
 

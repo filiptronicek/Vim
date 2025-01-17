@@ -1,16 +1,8 @@
-import { Clipboard } from './../util/clipboard';
-import {
-  ActionDeleteChar,
-  ActionDeleteCharWithDeleteKey,
-  ActionDeleteLastChar,
-  CommandRegister,
-  CommandYankFullLine,
-} from './../actions/commands/actions';
-import { DeleteOperator, YankOperator } from './../actions/operator';
-import { RecordedState } from './../state/recordedState';
-import { VimState } from './../state/vimState';
 import { readFileAsync, writeFileAsync } from 'platform/fs';
 import { Globals } from '../globals';
+import { RecordedState } from './../state/recordedState';
+import { VimState } from './../state/vimState';
+import { Clipboard } from './../util/clipboard';
 
 /**
  * This is included in the register file.
@@ -49,6 +41,7 @@ export class Register {
     '%', // Current file path (relative to workspace root)
     '#', // Previous file path (relative to workspace root)
     '_', // Black hole (always empty)
+    '=', // Expression register
   ];
 
   private static registers: Map<string, IRegisterContent[]>;
@@ -62,7 +55,7 @@ export class Register {
     vimState: VimState,
     content: RegisterContent,
     multicursorIndex?: number,
-    copyToUnnamed?: boolean
+    copyToUnnamed?: boolean,
   ): void {
     const register = vimState.recordedState.registerName;
 
@@ -122,11 +115,11 @@ export class Register {
    * Puts the content at the specified index of the multicursor Register.
    * If multicursorIndex === 0, the register will be completely overwritten. Otherwise, just that index will be.
    */
-  private static overwriteRegister(
+  public static overwriteRegister(
     vimState: VimState,
     register: string,
     content: RegisterContent,
-    multicursorIndex: number
+    multicursorIndex: number,
   ): void {
     if (multicursorIndex === 0 || !Register.registers.has(register)) {
       Register.registers.set(register, []);
@@ -142,7 +135,7 @@ export class Register {
       this.isClipboardRegister(register) &&
       !(content instanceof RecordedState)
     ) {
-      Clipboard.Copy(content);
+      void Clipboard.Copy(content);
     }
 
     this.processNumberedRegisters(vimState, content);
@@ -155,7 +148,7 @@ export class Register {
     vimState: VimState,
     register: string,
     content: RegisterContent,
-    multicursorIndex: number
+    multicursorIndex: number,
   ): void {
     if (!Register.registers.has(register)) {
       Register.registers.set(register, []);
@@ -189,35 +182,9 @@ export class Register {
     if (multicursorIndex === 0 && this.isClipboardRegister(register)) {
       const newContent = contentByCursor[multicursorIndex].text;
       if (!(newContent instanceof RecordedState)) {
-        Clipboard.Copy(newContent);
+        void Clipboard.Copy(newContent);
       }
     }
-  }
-
-  /** @deprecated Currently used only by tests */
-  public static putByKey(
-    register: string,
-    content: RegisterContent,
-    registerMode = RegisterMode.CharacterWise
-  ): void {
-    if (!Register.isValidRegister(register)) {
-      throw new Error(`Invalid register ${register}`);
-    }
-
-    if (Register.isClipboardRegister(register)) {
-      Clipboard.Copy(content.toString());
-    }
-
-    if (Register.isBlackHoleRegister(register) || Register.isReadOnlyRegister(register)) {
-      return;
-    }
-
-    Register.registers.set(register, [
-      {
-        text: content,
-        registerMode,
-      },
-    ]);
   }
 
   /**
@@ -225,7 +192,7 @@ export class Register {
    */
   public static setReadonlyRegister(
     register: '.' | '%' | ':' | '#' | '/',
-    content: RegisterContent
+    content: RegisterContent,
   ) {
     Register.registers.set(register, [
       {
@@ -241,11 +208,14 @@ export class Register {
   private static processNumberedRegisters(vimState: VimState, content: RegisterContent): void {
     // Find the BaseOperator of the current actions
     const baseOperator = vimState.recordedState.operator || vimState.recordedState.command;
+    if (!baseOperator) {
+      return;
+    }
 
-    if (baseOperator instanceof YankOperator || baseOperator instanceof CommandYankFullLine) {
+    if (baseOperator.name === 'yank_op' || baseOperator.name === 'yank_full_line') {
       // 'yank' to 0 only if no register was specified
       const registerCommand = vimState.recordedState.actionsRun.find((value) => {
-        return value instanceof CommandRegister;
+        return value.name === 'cmd_register';
       });
 
       if (!registerCommand) {
@@ -257,10 +227,11 @@ export class Register {
         ]);
       }
     } else if (
-      (baseOperator instanceof DeleteOperator ||
-        baseOperator instanceof ActionDeleteChar ||
-        baseOperator instanceof ActionDeleteLastChar ||
-        baseOperator instanceof ActionDeleteCharWithDeleteKey) &&
+      (baseOperator.name === 'delete_op' ||
+        baseOperator.name === 'delete_char' ||
+        baseOperator.name === 'delete_last_char' ||
+        baseOperator.name === 'delete_char_visual_line_mode' ||
+        baseOperator.name === 'delete_char_with_del') &&
       !(vimState.macro !== undefined || vimState.isReplayingMacro)
     ) {
       if (
@@ -298,7 +269,7 @@ export class Register {
    */
   public static async get(
     register: string,
-    multicursorIndex = 0
+    multicursorIndex = 0,
   ): Promise<IRegisterContent | undefined> {
     if (!Register.isValidRegister(register)) {
       throw new Error(`Invalid register ${register}`);
@@ -358,7 +329,7 @@ export class Register {
             version: REGISTER_FORMAT_VERSION,
             registers: serializableRegisters,
           }),
-          'utf8'
+          'utf8',
         );
       });
     }
@@ -367,14 +338,17 @@ export class Register {
   public static loadFromDisk(supportNode: boolean): void {
     if (supportNode) {
       Register.registers = new Map();
-      import('path').then((path) => {
-        readFileAsync(path.join(Globals.extensionStoragePath, '.registers'), 'utf8').then(
+      void import('path').then((path) => {
+        void readFileAsync(path.join(Globals.extensionStoragePath, '.registers'), 'utf8').then(
           (savedRegisters) => {
+            // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
             const parsed = JSON.parse(savedRegisters);
+            // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
             if (parsed.version === REGISTER_FORMAT_VERSION) {
+              // eslint-disable-next-line @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-member-access
               Register.registers = new Map(parsed.registers);
             }
-          }
+          },
         );
       });
     } else {

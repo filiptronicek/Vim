@@ -1,5 +1,6 @@
 import { Position, Range, TextDocumentContentChangeEvent } from 'vscode';
 import { RecordedState } from '../state/recordedState';
+import { LineRange } from '../vimscript/lineRange';
 import { PositionDiff } from './../common/motion/position';
 
 /**
@@ -113,20 +114,6 @@ export interface InsertTextVSCodeTransformation {
 }
 
 /**
- * <BS>
- */
-export interface DeleteLeft {
-  type: 'deleteLeft';
-}
-
-/**
- * <Del>
- */
-export interface DeleteRight {
-  type: 'deleteRight';
-}
-
-/**
  * Represents deleting a range of characters.
  */
 export interface DeleteTextRangeTransformation {
@@ -168,49 +155,18 @@ export interface MoveCursorTransformation {
 }
 
 /**
- * Represents pressing ':'
- */
-export interface ShowCommandHistory {
-  type: 'showCommandHistory';
-}
-
-export interface ShowSearchHistory {
-  type: 'showSearchHistory';
-  direction: number;
-}
-
-/**
  * Replays a RecordedState. Used for `.`, primarily.
  */
 export interface Dot {
   type: 'replayRecordedState';
+  count: number;
   recordedState: RecordedState;
 }
 
-/**
- * Represents Tab
- */
-export interface Tab {
-  type: 'tab';
-  cursorIndex?: number;
-
-  /**
-   * Move the cursor this much.
-   */
-  diff?: PositionDiff;
-}
-
-/**
- * Represents reindenting the selected line
- */
-export interface Reindent {
-  type: 'reindent';
-  cursorIndex?: number;
-
-  /**
-   * Move the cursor this much.
-   */
-  diff?: PositionDiff;
+export interface VSCodeCommandTransformation {
+  type: 'vscodeCommand';
+  command: string;
+  args: any[];
 }
 
 /**
@@ -231,21 +187,23 @@ export interface ContentChangeTransformation {
   diff: PositionDiff;
 }
 
+export interface ExecuteNormalTransformation {
+  type: 'executeNormal';
+  keystrokes: string;
+  range?: LineRange;
+}
+
 export type Transformation =
   | InsertTextTransformation
   | InsertTextVSCodeTransformation
   | ReplaceTextTransformation
   | DeleteTextRangeTransformation
-  | DeleteLeft
-  | DeleteRight
   | MoveCursorTransformation
-  | ShowCommandHistory
-  | ShowSearchHistory
   | Dot
   | Macro
   | ContentChangeTransformation
-  | Tab
-  | Reindent;
+  | ExecuteNormalTransformation
+  | VSCodeCommandTransformation;
 
 /**
  * Text Transformations
@@ -285,7 +243,7 @@ const getRangeFromTextTransformation = (transformation: TextTransformations): Ra
     case 'insertText':
       return new Range(
         transformation.position,
-        transformation.position.advancePositionByText(transformation.text)
+        transformation.position.advancePositionByText(transformation.text),
       );
     case 'replaceText':
       // TODO: Do we need to do the same sort of thing here as for insertText?
@@ -296,11 +254,12 @@ const getRangeFromTextTransformation = (transformation: TextTransformations): Ra
       return undefined;
   }
 
+  // eslint-disable-next-line @typescript-eslint/restrict-plus-operands
   throw new Error('Unhandled text transformation: ' + transformation);
 };
 
 export function overlappingTransformations(
-  transformations: TextTransformations[]
+  transformations: TextTransformations[],
 ): [TextTransformations, TextTransformations] | undefined {
   for (let i = 0; i < transformations.length; i++) {
     for (let j = i + 1; j < transformations.length; j++) {
@@ -329,7 +288,8 @@ export const areAllSameTransformation = (transformations: Transformation[]): boo
 
   return transformations.every((t) => {
     return Object.entries(t).every(([key, value]) => {
-      return firstTransformation[key] === value;
+      // TODO: this is all quite janky
+      return (firstTransformation as unknown as Record<string, any>)[key] === value;
     });
   });
 };

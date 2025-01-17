@@ -13,7 +13,6 @@ import { clamp } from './util/util';
  */
 export class TextEditor {
   private static readonly whitespaceRegExp = new RegExp('\\s+');
-  private static readonly logger = Logger.get('TextEditor');
 
   /**
    * @deprecated Use InsertTextTransformation (or InsertTextVSCodeTransformation) instead.
@@ -22,7 +21,7 @@ export class TextEditor {
     editor: vscode.TextEditor,
     text: string,
     at?: Position,
-    letVSCodeHandleKeystrokes?: boolean
+    letVSCodeHandleKeystrokes?: boolean,
   ): Promise<void> {
     // If we insert "blah(" with default:type, VSCode will insert the closing ).
     // We *probably* don't want that to happen if we're inserting a lot of text.
@@ -47,7 +46,7 @@ export class TextEditor {
   static async replace(
     editor: vscode.TextEditor,
     range: vscode.Range,
-    text: string
+    text: string,
   ): Promise<boolean> {
     return editor.edit((editBuilder) => {
       editBuilder.replace(range, text);
@@ -62,7 +61,7 @@ export class TextEditor {
 
   public static getLineLength(line: number): number {
     if (line < 0 || line >= TextEditor.getLineCount()) {
-      this.logger.warn(`getLineLength() called with out-of-bounds line ${line}`);
+      Logger.warn(`getLineLength() called with out-of-bounds line ${line}`);
       return 0;
     }
 
@@ -141,12 +140,12 @@ export class TextEditor {
   /**
    * @returns the number of visible columns that the given line begins with
    */
-  static getIndentationLevel(line: string): number {
+  static getIndentationLevel(line: string, tabSize: number): number {
     let visibleColumn = 0;
     for (const char of line) {
       switch (char) {
         case '\t':
-          visibleColumn += configuration.tabstop;
+          visibleColumn += tabSize;
           break;
         case ' ':
           visibleColumn += 1;
@@ -162,14 +161,14 @@ export class TextEditor {
   /**
    * @returns `line` with its indentation replaced with `screenCharacters` visible columns of whitespace
    */
-  static setIndentationLevel(line: string, screenCharacters: number): string {
+  static setIndentationLevel(line: string, screenCharacters: number, expandtab: boolean): string {
     const tabSize = configuration.tabstop;
 
     if (screenCharacters < 0) {
       screenCharacters = 0;
     }
 
-    const indentString = configuration.expandtab
+    const indentString = expandtab
       ? ' '.repeat(screenCharacters)
       : '\t'.repeat(screenCharacters / tabSize) + ' '.repeat(screenCharacters % tabSize);
 
@@ -191,7 +190,7 @@ export class TextEditor {
    */
   public static getFirstNonWhitespaceCharOnLine(
     document: vscode.TextDocument,
-    line: number
+    line: number,
   ): Position {
     line = clamp(line, 0, document.lineCount - 1);
     return new Position(line, document.lineAt(line).firstNonWhitespaceCharacterIndex);
@@ -206,7 +205,7 @@ export class TextEditor {
   public static *iterateLinesInBlock(
     vimState: VimState,
     cursor?: Cursor,
-    options: { reverse?: boolean } = { reverse: false }
+    options: { reverse?: boolean } = { reverse: false },
   ): Iterable<{ line: string; start: Position; end: Position }> {
     const { reverse } = options;
 
@@ -244,7 +243,7 @@ export class TextEditor {
    */
   public static *iterateWords(
     document: vscode.TextDocument,
-    start: Position
+    start: Position,
   ): Iterable<{ start: Position; end: Position; word: string }> {
     const text = document.lineAt(start).text;
     if (/\s/.test(text[start.character])) {

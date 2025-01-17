@@ -1,13 +1,9 @@
-import { cleanUpWorkspace, setupWorkspace } from './../../testUtils';
+import { setupWorkspace } from './../../testUtils';
 import { Mode } from '../../../src/mode/mode';
 import { newTest, newTestSkip } from '../../testSimplifier';
 
 suite('Motions in Normal Mode', () => {
-  setup(async () => {
-    await setupWorkspace();
-  });
-
-  teardown(cleanUpWorkspace);
+  suiteSetup(setupWorkspace);
 
   suite('w', () => {
     newTest({
@@ -971,7 +967,7 @@ suite('Motions in Normal Mode', () => {
         keysPressed: '10go',
         end: ['abc', 'def', 'g|hi'],
       },
-      process.platform === 'win32'
+      process.platform === 'win32',
     );
   });
 
@@ -1029,6 +1025,20 @@ suite('Motions in Normal Mode', () => {
     start: ['blah', 'du|h', 'a', 'hur '],
     keysPressed: 'gjgj',
     end: ['blah', 'duh', 'a', 'hu|r '],
+  });
+
+  newTest({
+    title: 'special treatment of curly braces',
+    start: ['{', '|    {  {  }   }   ', '}'],
+    keysPressed: 'di{',
+    end: ['{', '    {|}   ', '}'],
+  });
+
+  newTest({
+    title: 'no special treatment of curly braces if any other character is present',
+    start: ['{', 'a  |  {  {  }   }   ', '}'],
+    keysPressed: 'di{',
+    end: ['{', '|}'],
   });
 
   suite("doesn't update desiredColumn when it shouldn't", () => {

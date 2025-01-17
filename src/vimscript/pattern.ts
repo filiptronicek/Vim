@@ -1,8 +1,9 @@
-import { escapeRegExp } from 'lodash';
-import { alt, any, lazy, noneOf, oneOf, Parser, seq, string, seqMap } from 'parsimmon';
+// eslint-disable-next-line id-denylist
+import { Parser, alt, any, eof, lazy, noneOf, oneOf, seq, seqMap, string } from 'parsimmon';
 import { Position, Range, TextDocument } from 'vscode';
 import { configuration } from '../configuration/configuration';
 import { VimState } from '../state/vimState';
+import { TextEditor } from '../textEditor';
 import { LineRange } from './lineRange';
 import { numberParser } from './parserUtils';
 
@@ -15,7 +16,7 @@ export function searchStringParser(args: {
 }> {
   return seq(
     Pattern.parser(args),
-    lazy(() => SearchOffset.parser.fallback(undefined))
+    lazy(() => SearchOffset.parser.fallback(undefined)),
   ).map(([pattern, offset]) => {
     return { pattern, offset };
   });
@@ -43,11 +44,17 @@ export class Pattern {
   public readonly inSelection: boolean;
   public readonly closed: boolean; // was an ending delimiter present?
 
-  private static readonly MAX_SEARCH_RANGES = 1000;
+  /** `true` if this pattern has an empty branch (/foo|/, for instance) */
+  private readonly emptyBranch: boolean;
+
   private static readonly MAX_SEARCH_TIME = 1000;
   private static readonly SPECIAL_CHARS_REGEX = /[\-\[\]{}()*+?.,\\\^$|#\s]/g;
 
   public nextMatch(document: TextDocument, fromPosition: Position): Range | undefined {
+    if (this.emptyBranch) {
+      const pos = fromPosition.getRightThroughLineBreaks();
+      return new Range(pos, pos);
+    }
     const haystack = document.getText();
     this.regex.lastIndex = document.offsetAt(fromPosition) + 1;
     const match = this.regex.exec(haystack);
@@ -69,8 +76,18 @@ export class Pattern {
         }
       | {
           lineRange: LineRange;
-        }
+        },
   ): PatternMatch[] {
+    if (this.emptyBranch) {
+      // HACK: This pattern matches each character, but for purposes of perf when highlighting, merge them.
+      return [
+        {
+          range: new Range(new Position(0, 0), TextEditor.getDocumentEnd(vimState.document)),
+          groups: [],
+        },
+      ];
+    }
+
     let fromPosition: Position;
     let lineRange:
       | {
@@ -93,7 +110,7 @@ export class Pattern {
       // TODO: This is not exactly how Vim implements in-selection search (\%V), see :help \%V for more info.
       const searchRange = new Range(
         vimState.lastVisualSelection.start,
-        vimState.lastVisualSelection.end
+        vimState.lastVisualSelection.end,
       );
       haystack = vimState.document.getText(searchRange);
       searchOffset = vimState.document.offsetAt(vimState.lastVisualSelection.start);
@@ -108,6 +125,8 @@ export class Pattern {
 
     this.regex.lastIndex = startOffset;
 
+    const start = Date.now();
+
     const matchRanges = {
       beforeWrapping: [] as PatternMatch[],
       afterWrapping: [] as PatternMatch[],
@@ -115,11 +134,6 @@ export class Pattern {
     let wrappedOver = false;
     while (true) {
       const match = this.regex.exec(haystack);
-
-      let searchTimeout = false;
-      setTimeout(() => {
-        searchTimeout = true;
-      }, Pattern.MAX_SEARCH_TIME);
 
       if (match) {
         if (wrappedOver && match.index >= startOffset) {
@@ -129,7 +143,7 @@ export class Pattern {
 
         const matchRange = new Range(
           vimState.document.positionAt(searchOffset + match.index),
-          vimState.document.positionAt(searchOffset + match.index + match[0].length)
+          vimState.document.positionAt(searchOffset + match.index + match[0].length),
         );
         if (
           !this.inSelection &&
@@ -144,7 +158,7 @@ export class Pattern {
           groups: match,
         });
 
-        if (searchTimeout) {
+        if (Date.now() - start > Pattern.MAX_SEARCH_TIME) {
           break;
         }
 
@@ -165,25 +179,12 @@ export class Pattern {
   }
 
   private static compileRegex(regexString: string, ignoreCase?: boolean): RegExp {
-    const flags = ignoreCase ?? configuration.ignorecase ? 'gim' : 'gm';
+    const flags = (ignoreCase ?? configuration.ignorecase) ? 'gim' : 'gm';
     try {
       return new RegExp(regexString, flags);
     } catch (err) {
       // Couldn't compile the regexp, try again with special characters escaped
       return new RegExp(regexString.replace(Pattern.SPECIAL_CHARS_REGEX, '\\$&'), flags);
-    }
-  }
-
-  public static fromLiteralString(
-    input: string,
-    direction: SearchDirection,
-    wordBoundaries: boolean
-  ): Pattern {
-    const patternString = input.replace(escapeRegExp(input), '\\$&');
-    if (wordBoundaries) {
-      return new Pattern(`\\<${patternString}\\>`, direction, Pattern.compileRegex(patternString));
-    } else {
-      return new Pattern(patternString, direction, Pattern.compileRegex(patternString));
     }
   }
 
@@ -195,15 +196,20 @@ export class Pattern {
     const delimiter = args.delimiter
       ? args.delimiter
       : args.direction === SearchDirection.Forward
-      ? '/'
-      : '?';
+        ? '/'
+        : '?';
     // TODO: Some escaped characters need special treatment
     return seqMap(
+      string('|').result(true).fallback(false), // Leading | matches everything
       alt(
         string('\\%V').map((_) => ({ inSelection: true })),
         string('$').map(() => '(?:$(?<!\\r))'), // prevents matching \r\n as two lines
         string('^').map(() => '(?:^(?<!\\r))'), // prevents matching \r\n as two lines
+        string('|')
+          .then(eof)
+          .map(() => ({ emptyBranch: true })), // Trailing | matches everything
         string('\\')
+          // eslint-disable-next-line id-denylist
           .then(any.fallback(undefined))
           .map((escaped) => {
             if (escaped === undefined) {
@@ -225,27 +231,36 @@ export class Pattern {
         alt(
           // Allow unescaped delimiter inside [], and don't transform ^ or $
           string('\\')
+            // eslint-disable-next-line id-denylist
             .then(any.fallback(undefined))
             .map((escaped) => '\\' + (escaped ?? '\\')),
-          noneOf(']')
+          noneOf(']'),
         )
           .many()
           .wrap(string('['), string(']'))
           .map((result) => '[' + result.join('') + ']'),
-        noneOf(delimiter)
+        noneOf(delimiter),
       ).many(),
       string(delimiter).fallback(undefined),
-      (atoms, delim) => {
-        let patternString = '';
+      (leadingBar, atoms, delim) => {
+        let patternString = leadingBar ? '|' : '';
         let caseOverride: boolean | undefined;
         let inSelection: boolean | undefined;
+        let emptyBranch: boolean = leadingBar;
         for (const atom of atoms) {
           if (typeof atom === 'string') {
             patternString += atom;
           } else {
-            if (atom.ignorecase) {
+            // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+            if (atom.emptyBranch) {
+              emptyBranch = true;
+              patternString += '|';
+              // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+            } else if (atom.ignorecase) {
               caseOverride = true;
+              // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
             } else if (atom.inSelection) {
+              // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
               inSelection = atom.inSelection;
             } else if (caseOverride === undefined) {
               caseOverride = false;
@@ -257,9 +272,10 @@ export class Pattern {
           caseOverride,
           inSelection,
           closed: delim !== undefined,
+          emptyBranch,
         };
-      }
-    ).map(({ patternString, caseOverride, inSelection, closed }) => {
+      },
+    ).map(({ patternString, caseOverride, inSelection, closed, emptyBranch }) => {
       const ignoreCase = Pattern.getIgnoreCase(patternString, {
         caseOverride,
         ignoreSmartcase: args.ignoreSmartcase ?? false,
@@ -268,15 +284,16 @@ export class Pattern {
         patternString,
         args.direction,
         Pattern.compileRegex(patternString, ignoreCase),
-        inSelection,
-        closed
+        inSelection ?? false,
+        closed,
+        emptyBranch,
       );
     });
   }
 
   private static getIgnoreCase(
     patternString: string,
-    flags: { caseOverride?: boolean; ignoreSmartcase: boolean }
+    flags: { caseOverride?: boolean; ignoreSmartcase: boolean },
   ): boolean {
     if (flags.caseOverride !== undefined) {
       return flags.caseOverride;
@@ -290,8 +307,9 @@ export class Pattern {
     patternString: string,
     direction: SearchDirection,
     regex: RegExp,
-    inSelection: boolean = false,
-    closed: boolean = false
+    inSelection: boolean,
+    closed: boolean,
+    emptyBranch: boolean,
   ) {
     this.patternString = patternString;
     this.direction = direction;
@@ -299,6 +317,7 @@ export class Pattern {
     this.regex = regex;
     this.inSelection = inSelection;
     this.closed = closed;
+    this.emptyBranch = emptyBranch;
   }
 }
 
@@ -336,14 +355,14 @@ export class SearchOffset {
         new SearchOffset({
           type,
           delta: sign === '-' ? -num : num,
-        })
+        }),
     ),
     seq(searchOffsetTypeParser, oneOf('+-')).map(
       ([type, sign]) =>
         new SearchOffset({
           type,
           delta: sign === '-' ? -1 : 1,
-        })
+        }),
     ),
     seq(searchOffsetTypeParser).map(([type]) => new SearchOffset({ type, delta: 0 })),
     string(';/')
@@ -365,7 +384,7 @@ export class SearchOffset {
           pattern,
           offset,
         });
-      })
+      }),
   );
 
   public constructor(data: SearchOffsetData) {
